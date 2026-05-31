@@ -12,9 +12,12 @@
   "homepage": "https://github.com/cclank/cell-architecture-studio#readme",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/use-rollup-wasm.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/use-rollup-wasm.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "preverify": "node scripts/use-rollup-wasm.mjs",
     "verify": "node scripts/verify.mjs"
   },
   "dependencies": {
@@ -26,6 +29,7 @@
     "three": "^0.181.2"
   },
   "devDependencies": {
+    "@rollup/wasm-node": "^4.60.3",
     "@types/node": "^24.10.1",
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19.2.2",

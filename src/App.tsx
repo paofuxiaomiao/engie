@@ -1,31 +1,29 @@
 import {
+  Activity,
   ArrowRight,
-  BookOpen,
-  Box,
-  Brain,
-  Camera,
-  ChevronDown,
-  CircleDot,
+  BatteryCharging,
+  BrainCircuit,
+  Car,
+  CircuitBoard,
+  Compass,
+  Eye,
   Gauge,
-  EyeOff,
-  Grid3X3,
-  Heart,
-  Info,
-  Leaf,
-  MessageCircle,
-  Library,
-  Microscope,
-  Plus,
+  Layers3,
+  Radar,
   RotateCcw,
-  Settings,
+  ScanLine,
   Sparkles,
-  Star,
-  Target,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { CellScene } from "./components/CellScene";
-import { cells, getCellById, type CellItem, type ViewMode } from "./data/cells";
+import { VehicleScene } from "./components/CellScene";
+import {
+  getVehicleModuleById,
+  vehicleProfile,
+  type ScenePart,
+  type VehicleModule,
+  type ViewMode,
+} from "./data/vehicle";
 
 type ModeOption = {
   id: ViewMode;
@@ -33,134 +31,134 @@ type ModeOption = {
   Icon: LucideIcon;
 };
 
+type ModuleIconMap = Record<ScenePart, LucideIcon>;
+
 const modeOptions: ModeOption[] = [
-  { id: "mesh", label: "Mesh", Icon: Box },
-  { id: "focus", label: "Focus", Icon: CircleDot },
+  { id: "assembled", label: "整车", Icon: Car },
+  { id: "xray", label: "透视", Icon: ScanLine },
+  { id: "focus", label: "聚焦", Icon: Eye },
 ];
 
-const initialCell = getCellById("animal");
+const moduleIcons: ModuleIconMap = {
+  body: Gauge,
+  battery: BatteryCharging,
+  drive: Activity,
+  chassis: Layers3,
+  adas: Radar,
+  cockpit: BrainCircuit,
+};
 
-function Header({ cell }: { cell: CellItem }) {
+const initialModule = vehicleProfile.modules[0];
+
+const engineTopics = [
+  {
+    id: "engine-principle",
+    title: "发动机工作原理与基本构造",
+    eyebrow: "四冲程循环",
+    image: "/engine-renders/engine-principle.png",
+    color: "#0f8fb3",
+    summary:
+      "以内燃机剖面展示气缸、活塞、曲轴、进排气通道与火花塞，帮助理解进气、压缩、做功、排气如何连续循环。",
+    points: ["气缸把燃烧压力转为推力", "活塞上下运动驱动曲轴旋转", "进排气路径决定换气效率"],
+  },
+  {
+    id: "crank-valve",
+    title: "曲柄连杆机构与配气机构",
+    eyebrow: "机械同步",
+    image: "/engine-renders/crank-valve.png",
+    color: "#f28c28",
+    summary:
+      "把曲轴、连杆、活塞、凸轮轴、正时链条和气门放在同一张结构图中，强调动力输出与气门开闭的时序关系。",
+    points: ["连杆把直线往复变成旋转", "凸轮轴控制气门开闭节奏", "正时机构保证活塞与气门避让"],
+  },
+  {
+    id: "fuel-ignition",
+    title: "燃油供给与点火系统",
+    eyebrow: "混合气形成",
+    image: "/engine-renders/fuel-ignition.png",
+    color: "#20b66f",
+    summary:
+      "展示燃油泵、燃油轨、喷油器、进气歧管、点火线圈和火花塞，让燃油、空气、电火花三条路径同时可见。",
+    points: ["燃油被加压送到喷油器", "空气进入气缸形成可燃混合气", "火花塞在合适时刻点燃混合气"],
+  },
+  {
+    id: "cooling-lubrication",
+    title: "冷却系统与润滑系统",
+    eyebrow: "热管理与减摩",
+    image: "/engine-renders/cooling-lubrication.png",
+    color: "#7c5cff",
+    summary:
+      "用蓝色冷却液回路和金色机油回路表现水套、散热器、水泵、油底壳、机油泵与油道的协同工作。",
+    points: ["冷却液带走燃烧产生的热量", "机油在轴承和凸轮表面形成油膜", "过滤与循环决定长期可靠性"],
+  },
+];
+
+function Header({ selectedModule }: { selectedModule: VehicleModule }) {
   return (
     <header className="topbar">
       <div className="brand-block">
-        <div className="brand-orb" aria-hidden="true">
-          <Sparkles size={26} />
-        </div>
+        <span className="brand-mark" aria-hidden="true">
+          <CircuitBoard size={26} />
+        </span>
         <div>
-          <h1>Cell Architecture Studio</h1>
-          <p>Explore life at the microscopic level</p>
+          <p>Vehicle Structure Studio</p>
+          <h1>SU7 风格纯电轿跑结构可视化</h1>
         </div>
       </div>
 
-      <nav className="top-nav" aria-label="Primary">
-        <a href="#gallery">
-          <Grid3X3 size={24} />
-          <span>Gallery</span>
-        </a>
-        <a href="#library">
-          <Library size={24} />
-          <span>Library</span>
-        </a>
-        <a href="#notebooks">
-          <BookOpen size={24} />
-          <span>Notebooks</span>
-        </a>
-        <a href="#settings">
-          <Settings size={24} />
-          <span>Settings</span>
-        </a>
-        <button className="avatar-button" type="button" aria-label="User menu">
-          <span className="avatar-core" style={{ background: cell.accentSoft }}>
-            <span style={{ background: cell.accent }} />
+      <div className="top-metrics" aria-label="车辆参数摘要">
+        {vehicleProfile.dimensions.map((item) => (
+          <span key={item.label}>
+            <em>{item.label}</em>
+            <strong>{item.value}</strong>
           </span>
-          <ChevronDown size={20} />
-        </button>
-      </nav>
+        ))}
+      </div>
+
+      <span className="active-chip" style={{ "--chip": selectedModule.color } as CSSProperties}>
+        <Sparkles size={16} />
+        {selectedModule.name}
+      </span>
     </header>
   );
 }
 
-type SidebarProps = {
-  selectedCell: CellItem;
-  activeOrganelle: string;
-  favorites: Set<string>;
-  onSelectCell: (id: string) => void;
-  onSelectOrganelle: (id: string) => void;
-  onToggleFavorite: (id: string) => void;
+type ModuleRailProps = {
+  selectedModuleId: string;
+  onSelectModule: (id: string) => void;
 };
 
-function MiniCell({ cell }: { cell: CellItem }) {
-  if (cell.renderImage?.url) {
-    return (
-      <span className="mini-cell has-preview" style={{ "--thumb": cell.accent } as CSSProperties}>
-        <img src={cell.renderImage.url} alt="" aria-hidden="true" />
-      </span>
-    );
-  }
-
-  if (cell.modelAsset?.previewUrl) {
-    return (
-      <span className="mini-cell has-preview" style={{ "--thumb": cell.accent } as CSSProperties}>
-        <img src={cell.modelAsset.previewUrl} alt="" aria-hidden="true" />
-      </span>
-    );
-  }
-
-  return (
-    <span className={`mini-cell mini-cell-${cell.modelKind}`} style={{ "--thumb": cell.accent } as CSSProperties}>
-      <span />
-      <i />
-      <b />
-    </span>
-  );
-}
-
-function Sidebar({
-  selectedCell,
-  activeOrganelle,
-  favorites,
-  onSelectCell,
-  onSelectOrganelle,
-  onToggleFavorite,
-}: SidebarProps) {
+function ModuleRail({ selectedModuleId, onSelectModule }: ModuleRailProps) {
   return (
     <aside className="left-rail">
-      <section className="panel cell-type-panel">
+      <section className="panel module-panel">
         <div className="panel-heading">
           <span>
-            <Leaf size={18} />
-            Cell Types
+            <Compass size={18} />
+            结构模块
           </span>
-          <ChevronDown size={18} />
+          <small>6 systems</small>
         </div>
 
-        <div className="cell-list">
-          {cells.map((cell) => {
-            const selected = selectedCell.id === cell.id;
+        <div className="module-list">
+          {vehicleProfile.modules.map((module, index) => {
+            const Icon = moduleIcons[module.scenePart];
+            const active = selectedModuleId === module.id;
             return (
               <button
-                className={`cell-row ${selected ? "is-active" : ""}`}
+                key={module.id}
                 type="button"
-                key={cell.id}
-                onClick={() => onSelectCell(cell.id)}
+                className={`module-row ${active ? "is-active" : ""}`}
+                style={{ "--module": module.color } as CSSProperties}
+                onClick={() => onSelectModule(module.id)}
               >
-                <MiniCell cell={cell} />
-                <span className="cell-row-copy">
-                  <strong>{cell.name}</strong>
-                  <span>{cell.type}</span>
+                <span className="module-index">{String(index + 1).padStart(2, "0")}</span>
+                <span className="module-icon">
+                  <Icon size={22} />
                 </span>
-                <span
-                  className={`favorite-dot ${favorites.has(cell.id) ? "is-on" : ""}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onToggleFavorite(cell.id);
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Favorite ${cell.name}`}
-                >
-                  <Star size={18} fill="currentColor" />
+                <span className="module-copy">
+                  <strong>{module.name}</strong>
+                  <em>{module.subtitle}</em>
                 </span>
               </button>
             );
@@ -168,71 +166,49 @@ function Sidebar({
         </div>
       </section>
 
-      <section className="panel organelle-panel">
+      <section className="panel disclaimer-panel">
         <div className="panel-heading">
           <span>
-            <Sparkles size={16} />
-            Organelles
+            <Sparkles size={17} />
+            展示边界
           </span>
-          <ChevronDown size={18} />
         </div>
-
-        <div className="organelle-list">
-          {selectedCell.organelles.map((organelle) => (
-            <button
-              className={`organelle-row ${activeOrganelle === organelle.id ? "is-active" : ""}`}
-              type="button"
-              key={organelle.id}
-              onClick={() => onSelectOrganelle(organelle.id)}
-            >
-              <span className="color-dot" style={{ background: organelle.color }} />
-              <span>{organelle.name}</span>
-            </button>
-          ))}
-        </div>
+        <p>非官方教学可视化，结构与参数基于公开资料抽象呈现；模型为程序化建模，不代表真实 CAD 数据。</p>
       </section>
     </aside>
   );
 }
 
 type StageProps = {
-  cell: CellItem;
-  activeOrganelle: string;
+  selectedModule: VehicleModule;
   viewMode: ViewMode;
-  crossSection: boolean;
   autoRotate: boolean;
   resetKey: number;
   onModeChange: (mode: ViewMode) => void;
-  onCrossSectionChange: (value: boolean) => void;
   onAutoRotateChange: (value: boolean) => void;
   onReset: () => void;
-  onToast: (message: string) => void;
 };
 
 function Stage({
-  cell,
-  activeOrganelle,
+  selectedModule,
   viewMode,
-  crossSection,
   autoRotate,
   resetKey,
   onModeChange,
-  onCrossSectionChange,
   onAutoRotateChange,
   onReset,
-  onToast,
 }: StageProps) {
   return (
     <main className="stage-column">
       <section className="stage-panel">
         <div className="stage-title">
           <div>
-            <h2>{cell.name}</h2>
-            <p>{cell.type}</p>
+            <p>Interactive 3D Platform</p>
+            <h2>{vehicleProfile.name}</h2>
           </div>
 
-          <div className="view-card">
-            <span>View Mode</span>
+          <div className="mode-card" aria-label="视图模式">
+            <span>视图模式</span>
             <div className="mode-switcher">
               {modeOptions.map(({ id, label, Icon }) => (
                 <button
@@ -242,28 +218,26 @@ function Stage({
                   onClick={() => onModeChange(id)}
                   title={label}
                 >
-                  <Icon size={22} />
+                  <Icon size={20} />
+                  <span>{label}</span>
                 </button>
               ))}
             </div>
-            <label className="toggle-line">
-              <span>Cross Section</span>
-              <input
-                type="checkbox"
-                checked={crossSection}
-                onChange={(event) => onCrossSectionChange(event.target.checked)}
-              />
-              <i />
-            </label>
+          </div>
+        </div>
+
+        <div className="selected-banner" style={{ "--module": selectedModule.color } as CSSProperties}>
+          <span />
+          <div>
+            <strong>{selectedModule.name}</strong>
+            <p>{selectedModule.subtitle}</p>
           </div>
         </div>
 
         <div className="canvas-wrap">
-          <CellScene
-            cell={cell}
-            activeOrganelle={activeOrganelle}
+          <VehicleScene
+            activeModuleId={selectedModule.id}
             viewMode={viewMode}
-            crossSection={crossSection}
             autoRotate={autoRotate}
             resetKey={resetKey}
           />
@@ -275,31 +249,20 @@ function Stage({
             className={autoRotate ? "is-active" : ""}
             onClick={() => onAutoRotateChange(!autoRotate)}
           >
-            <RotateCcw size={20} />
-            Rotate
+            <RotateCcw size={18} />
+            旋转
+          </button>
+          <button type="button" onClick={() => onModeChange("xray")}>
+            <ScanLine size={18} />
+            透视
           </button>
           <button type="button" onClick={() => onModeChange("focus")}>
-            <CircleDot size={20} />
-            Isolate
-          </button>
-          <button type="button" onClick={() => onModeChange("focus")}>
-            <EyeOff size={20} />
-            Hide Others
+            <Eye size={18} />
+            聚焦
           </button>
           <button type="button" onClick={onReset}>
-            <RotateCcw size={20} />
-            Reset View
-          </button>
-        </div>
-
-        <div className="export-toolbar">
-          <button type="button" onClick={() => onToast("截图功能这里先做占位。")}>
-            <Camera size={20} />
-            Screenshot
-          </button>
-          <button type="button" onClick={() => onToast("GLB 导出需要接入模型导出管线。")}>
-            <Box size={20} />
-            GLB Export
+            <RotateCcw size={18} />
+            重置
           </button>
         </div>
       </section>
@@ -307,281 +270,149 @@ function Stage({
   );
 }
 
-type RightPanelProps = {
-  cell: CellItem;
-  activeOrganelle: string;
-  favorites: Set<string>;
-  mastery: number;
-  viewedCellCount: number;
-  viewedOrganelleCount: number;
-  totalOrganelleCount: number;
-  tutorPrompt: string;
-  onToggleFavorite: (id: string) => void;
-  onTutorPrompt: (prompt: string) => void;
+type DetailPanelProps = {
+  selectedModule: VehicleModule;
+  exploredCount: number;
+  prompt: string;
+  onPrompt: (value: string) => void;
 };
 
-function buildTutorPrompts(cell: CellItem, organelle: CellItem["organelles"][number]) {
+function buildPrompts(module: VehicleModule) {
   return [
-    `Explain how ${organelle.name} helps a ${cell.name} stay alive.`,
-    `Quiz me on the visual differences between ${cell.name} and ${getCellById(cell.comparison).name}.`,
-    `Guide me through finding ${organelle.name} inside the 3D model.`,
+    `用三句话解释${module.name}在整车结构中的作用。`,
+    `把${module.name}和纯电平台的低重心优势联系起来讲解。`,
+    `面向小学生解释为什么${module.name}需要被单独高亮。`,
   ];
 }
 
-function RightPanel({
-  cell,
-  activeOrganelle,
-  favorites,
-  mastery,
-  viewedCellCount,
-  viewedOrganelleCount,
-  totalOrganelleCount,
-  tutorPrompt,
-  onToggleFavorite,
-  onTutorPrompt,
-}: RightPanelProps) {
-  const organelle = cell.organelles.find((item) => item.id === activeOrganelle) ?? cell.organelles[0];
-  const tutorPrompts = buildTutorPrompts(cell, organelle);
+function DetailPanel({ selectedModule, exploredCount, prompt, onPrompt }: DetailPanelProps) {
+  const prompts = buildPrompts(selectedModule);
+  const Icon = moduleIcons[selectedModule.scenePart];
+  const progress = Math.round((exploredCount / vehicleProfile.modules.length) * 100);
 
   return (
     <aside className="right-rail">
-      <section className="panel details-panel">
-        <div className="panel-heading detail-heading">
-          <span>Organelle Details</span>
-          <button type="button" onClick={() => onToggleFavorite(cell.id)} aria-label="Toggle favorite">
-            <Heart size={22} fill={favorites.has(cell.id) ? "currentColor" : "none"} />
-          </button>
+      <section className="panel details-panel" style={{ "--module": selectedModule.color } as CSSProperties}>
+        <div className="panel-heading">
+          <span>
+            <Icon size={18} />
+            当前模块
+          </span>
+          <small>{progress}% explored</small>
         </div>
 
         <div className="detail-hero">
-          <span className="organelle-orb" style={{ background: organelle.color }} />
+          <span className="detail-orb">
+            <Icon size={28} />
+          </span>
           <div>
-            <h3>{organelle.name}</h3>
-            <p>{organelle.subtitle}</p>
+            <h3>{selectedModule.name}</h3>
+            <p>{selectedModule.subtitle}</p>
           </div>
         </div>
 
         <dl className="attribute-list">
-          {organelle.attributes.map((item) => (
+          {selectedModule.attributes.map((item) => (
             <div key={item.label}>
               <dt>{item.label}</dt>
               <dd>{item.value}</dd>
             </div>
           ))}
-          <div>
-            <dt>Label</dt>
-            <dd>
-              <span className="mini-toggle is-on" />
-              <span className="detail-dot" style={{ background: organelle.color }} />
-            </dd>
-          </div>
         </dl>
       </section>
 
       <section className="panel notes-panel">
         <div className="panel-heading">
-          <span>Biological Notes</span>
+          <span>结构作用</span>
         </div>
-        <p>{organelle.note}</p>
-        <div className="fun-fact">
-          <span>Fun Fact: {organelle.fact}</span>
-          <Sparkles size={18} />
+        <p>{selectedModule.note}</p>
+        <div className="fact-line">
+          <Sparkles size={17} />
+          <span>{selectedModule.fact}</span>
         </div>
       </section>
 
-      <section className="panel learning-panel">
+      <section className="panel prompt-panel">
         <div className="panel-heading">
           <span>
-            <Brain size={17} />
-            AI Tutor
+            <BrainCircuit size={18} />
+            讲解提示
           </span>
         </div>
-
-        <div className="mastery-meter" style={{ "--progress": `${mastery}%` } as CSSProperties}>
-          <div>
-            <Gauge size={18} />
-            <span>Mastery</span>
-            <strong>{mastery}%</strong>
-          </div>
+        <div className="progress-meter" style={{ "--progress": `${progress}%` } as CSSProperties}>
+          <span>
+            已查看 {exploredCount}/{vehicleProfile.modules.length} 个模块
+          </span>
           <i>
             <b />
           </i>
-          <small>
-            {viewedCellCount}/{cells.length} cells explored · {viewedOrganelleCount}/{totalOrganelleCount} organelles inspected
-          </small>
         </div>
-
-        <div className="lesson-focus">
-          <span>
-            <Target size={17} />
-            Current lesson focus
-          </span>
-          <p>
-            Locate <strong>{organelle.name}</strong>, explain its role, then compare it with the matching structure in{" "}
-            {getCellById(cell.comparison).name}.
-          </p>
+        <div className="prompt-card">
+          <strong>当前提示</strong>
+          <p>{prompt}</p>
         </div>
-
-        <div className="tutor-prompt">
-          <span>
-            <MessageCircle size={17} />
-            Prompt staged for AI tutor
-          </span>
-          <p>{tutorPrompt}</p>
-        </div>
-
         <div className="prompt-list">
-          {tutorPrompts.map((prompt) => (
-            <button type="button" key={prompt} onClick={() => onTutorPrompt(prompt)}>
-              {prompt}
+          {prompts.map((item) => (
+            <button key={item} type="button" onClick={() => onPrompt(item)}>
+              {item}
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="panel occurrence-panel">
-        <div className="panel-heading">
-          <span>Where It Occurs</span>
-        </div>
-        <div className={`occurrence-art occurrence-${cell.occurrence.motif}`}>
-          <span />
-          <i />
-          <b />
-        </div>
-        <h4>{cell.occurrence.title}</h4>
-        <p>{cell.occurrence.body}</p>
       </section>
     </aside>
   );
 }
 
 type BottomPanelsProps = {
-  cell: CellItem;
-  onCompare: () => void;
-  onToast: (message: string) => void;
+  selectedModule: VehicleModule;
 };
 
-function BottomPanels({ cell, onCompare, onToast }: BottomPanelsProps) {
-  const comparedCell = getCellById(cell.comparison);
-
+function BottomPanels({ selectedModule }: BottomPanelsProps) {
   return (
     <section className="bottom-grid">
-      <div className="panel microscope-panel">
+      <div className="panel cutaway-panel">
         <div className="panel-heading">
           <span>
-            Microscope View
-            <Info size={16} />
+            <Layers3 size={18} />
+            结构剖面
           </span>
+          <small>imagegen asset</small>
         </div>
-        <div className="micro-card-row">
-          {cell.microscope.map((image) => (
-            <button
-              type="button"
-              key={image.label}
-              className={`micro-card pattern-${image.pattern}`}
-              style={{ "--micro": image.tone } as CSSProperties}
-              onClick={() => onToast(`${image.label} selected.`)}
-            >
-              <span />
-              <strong>{image.label}</strong>
-            </button>
-          ))}
-          <button type="button" className="micro-card add-card" onClick={() => onToast("Image upload is a planned step.")}>
-            <Plus size={28} />
-            <strong>Add Image</strong>
-          </button>
-        </div>
+        <figure>
+          <img src="/vehicle-renders/su7-style-cutaway.png" alt="SU7 风格纯电轿跑透明结构剖面渲染图" />
+        </figure>
       </div>
 
-      <div className="panel compare-panel">
+      <div className="panel relation-panel" style={{ "--module": selectedModule.color } as CSSProperties}>
         <div className="panel-heading">
           <span>
-            Compare Cells
-            <Info size={16} />
+            <CircuitBoard size={18} />
+            模块关系
           </span>
         </div>
-        <div className="compare-row">
-          <div>
-            <MiniCell cell={cell} />
-            <span>
-              <strong>{cell.name}</strong>
-              <em>You are here</em>
-            </span>
-          </div>
-          <b>VS</b>
-          <div>
-            <span>
-              <strong>{comparedCell.name}</strong>
-              <em>{comparedCell.type}</em>
-            </span>
-            <MiniCell cell={comparedCell} />
-          </div>
+        <div className="relation-map">
+          <span>车身</span>
+          <i />
+          <span>电池</span>
+          <i />
+          <span>电驱</span>
+          <i />
+          <span>轮端</span>
         </div>
-        <button type="button" className="comparison-button" onClick={onCompare}>
-          Open Comparison View
-          <ArrowRight size={20} />
-        </button>
+        <p>
+          当前聚焦 <strong>{selectedModule.name}</strong>。整车结构可理解为“车身承载 + 电池储能 + 电驱输出 +
+          底盘执行 + 感知决策 + 座舱交互”的协同系统。
+        </p>
+        <div className="dimension-grid">
+          {vehicleProfile.dimensions.map((item) => (
+            <span key={item.label}>
+              <em>{item.label}</em>
+              <strong>{item.value}</strong>
+            </span>
+          ))}
+        </div>
       </div>
     </section>
-  );
-}
-
-type ComparisonModalProps = {
-  cell: CellItem;
-  open: boolean;
-  onClose: () => void;
-};
-
-function ComparisonModal({ cell, open, onClose }: ComparisonModalProps) {
-  const comparedCell = getCellById(cell.comparison);
-  if (!open) {
-    return null;
-  }
-
-  const currentOrganelle = cell.organelles.find((item) => item.id === cell.defaultOrganelle) ?? cell.organelles[0];
-  const comparedOrganelle =
-    comparedCell.organelles.find((item) => item.id === comparedCell.defaultOrganelle) ?? comparedCell.organelles[0];
-
-  return (
-    <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Cell comparison">
-      <div className="comparison-modal">
-        <button className="modal-close" type="button" onClick={onClose}>
-          Close
-        </button>
-        <div className="comparison-modal-head">
-          <h3>Comparison View</h3>
-          <p>
-            {cell.name} compared with {comparedCell.name}
-          </p>
-        </div>
-        <div className="comparison-columns">
-          {[cell, comparedCell].map((item) => {
-            const organelle = item.id === cell.id ? currentOrganelle : comparedOrganelle;
-            return (
-              <section key={item.id}>
-                <MiniCell cell={item} />
-                <h4>{item.name}</h4>
-                <p>{item.type}</p>
-                <dl>
-                  <div>
-                    <dt>Default focus</dt>
-                    <dd>{organelle.name}</dd>
-                  </div>
-                  <div>
-                    <dt>Main note</dt>
-                    <dd>{organelle.subtitle}</dd>
-                  </div>
-                  <div>
-                    <dt>Occurs in</dt>
-                    <dd>{item.occurrence.title}</dd>
-                  </div>
-                </dl>
-              </section>
-            );
-          })}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -589,139 +420,121 @@ function Toast({ message }: { message: string | null }) {
   if (!message) {
     return null;
   }
+
   return <div className="toast">{message}</div>;
 }
 
+function EngineLearningSection() {
+  return (
+    <section className="engine-section">
+      <div className="engine-head">
+        <div>
+          <p>Image2 Technical Learning Pack</p>
+          <h2>发动机机械原理扩展</h2>
+        </div>
+        <span>内燃机结构教学 · 作为车辆机械基础补充</span>
+      </div>
+
+      <div className="engine-grid">
+        {engineTopics.map((topic, index) => (
+          <article
+            key={topic.id}
+            className="engine-card"
+            style={{ "--topic": topic.color } as CSSProperties}
+          >
+            <figure>
+              <img src={topic.image} alt={`${topic.title}技术示意图`} />
+            </figure>
+            <div className="engine-card-copy">
+              <span className="engine-index">{String(index + 1).padStart(2, "0")}</span>
+              <p>{topic.eyebrow}</p>
+              <h3>{topic.title}</h3>
+              <strong>{topic.summary}</strong>
+              <ul>
+                {topic.points.map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+              </ul>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
-  const [selectedCellId, setSelectedCellId] = useState(initialCell.id);
-  const [activeOrganelle, setActiveOrganelle] = useState(initialCell.defaultOrganelle);
-  const [viewMode, setViewMode] = useState<ViewMode>("mesh");
-  const [crossSection, setCrossSection] = useState(false);
+  const [selectedModuleId, setSelectedModuleId] = useState(initialModule.id);
+  const [viewMode, setViewMode] = useState<ViewMode>("assembled");
   const [autoRotate, setAutoRotate] = useState(true);
   const [resetKey, setResetKey] = useState(0);
-  const [favorites, setFavorites] = useState<Set<string>>(() => new Set([initialCell.id]));
-  const [viewedCells, setViewedCells] = useState<Set<string>>(() => new Set([initialCell.id]));
-  const [viewedOrganelleKeys, setViewedOrganelleKeys] = useState<Set<string>>(
-    () => new Set([`${initialCell.id}:${initialCell.defaultOrganelle}`]),
-  );
-  const [comparisonOpen, setComparisonOpen] = useState(false);
-  const [tutorPrompt, setTutorPrompt] = useState(
-    `Guide me through finding ${initialCell.organelles[0].name} inside the 3D model.`,
-  );
+  const [exploredModules, setExploredModules] = useState<Set<string>>(() => new Set([initialModule.id]));
+  const [prompt, setPrompt] = useState(`用三句话解释${initialModule.name}在整车结构中的作用。`);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
 
-  const selectedCell = useMemo(() => getCellById(selectedCellId), [selectedCellId]);
-  const totalOrganelleCount = useMemo(
-    () => cells.reduce((total, cell) => total + cell.organelles.length, 0),
-    [],
-  );
-  const mastery = useMemo(() => {
-    const cellCoverage = viewedCells.size / cells.length;
-    const organelleCoverage = viewedOrganelleKeys.size / totalOrganelleCount;
-    return Math.round((cellCoverage * 0.42 + organelleCoverage * 0.58) * 100);
-  }, [totalOrganelleCount, viewedCells, viewedOrganelleKeys]);
+  const selectedModule = useMemo(() => getVehicleModuleById(selectedModuleId), [selectedModuleId]);
 
   useEffect(() => {
-    setActiveOrganelle(selectedCell.defaultOrganelle);
-    setComparisonOpen(false);
-  }, [selectedCell]);
-
-  useEffect(() => {
-    setViewedCells((current) => {
+    setExploredModules((current) => {
       const next = new Set(current);
-      next.add(selectedCell.id);
+      next.add(selectedModule.id);
       return next;
     });
-    setViewedOrganelleKeys((current) => {
-      const next = new Set(current);
-      next.add(`${selectedCell.id}:${activeOrganelle}`);
-      return next;
-    });
-  }, [activeOrganelle, selectedCell.id]);
+    setPrompt(`用三句话解释${selectedModule.name}在整车结构中的作用。`);
+  }, [selectedModule]);
 
   function showToast(message: string) {
     setToast(message);
     if (toastTimer.current) {
       window.clearTimeout(toastTimer.current);
     }
-    toastTimer.current = window.setTimeout(() => setToast(null), 2600);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2400);
   }
 
-  function toggleFavorite(id: string) {
-    setFavorites((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+  function handlePrompt(value: string) {
+    setPrompt(value);
+    showToast("讲解提示已切换。");
   }
 
   const shellStyle = {
-    "--accent": selectedCell.accent,
-    "--accent-soft": selectedCell.accentSoft,
-    "--cell-color": selectedCell.color,
+    "--accent": vehicleProfile.accent,
+    "--accent-soft": vehicleProfile.accentSoft,
+    "--module": selectedModule.color,
   } as CSSProperties;
 
   return (
     <div className="app-shell" style={shellStyle}>
-      <Header cell={selectedCell} />
+      <Header selectedModule={selectedModule} />
 
       <div className="app-grid">
-        <Sidebar
-          selectedCell={selectedCell}
-          activeOrganelle={activeOrganelle}
-          favorites={favorites}
-          onSelectCell={setSelectedCellId}
-          onSelectOrganelle={setActiveOrganelle}
-          onToggleFavorite={toggleFavorite}
-        />
+        <ModuleRail selectedModuleId={selectedModule.id} onSelectModule={setSelectedModuleId} />
 
         <div className="center-stack">
           <Stage
-            cell={selectedCell}
-            activeOrganelle={activeOrganelle}
+            selectedModule={selectedModule}
             viewMode={viewMode}
-            crossSection={crossSection}
             autoRotate={autoRotate}
             resetKey={resetKey}
             onModeChange={setViewMode}
-            onCrossSectionChange={setCrossSection}
             onAutoRotateChange={setAutoRotate}
             onReset={() => {
               setResetKey((key) => key + 1);
-              showToast("View reset.");
+              showToast("视角已重置。");
             }}
-            onToast={showToast}
           />
-          <BottomPanels
-            cell={selectedCell}
-            onCompare={() => setComparisonOpen(true)}
-            onToast={showToast}
-          />
+          <BottomPanels selectedModule={selectedModule} />
         </div>
 
-        <RightPanel
-          cell={selectedCell}
-          activeOrganelle={activeOrganelle}
-          favorites={favorites}
-          mastery={mastery}
-          viewedCellCount={viewedCells.size}
-          viewedOrganelleCount={viewedOrganelleKeys.size}
-          totalOrganelleCount={totalOrganelleCount}
-          tutorPrompt={tutorPrompt}
-          onToggleFavorite={toggleFavorite}
-          onTutorPrompt={(prompt) => {
-            setTutorPrompt(prompt);
-            showToast("AI tutor prompt staged.");
-          }}
+        <DetailPanel
+          selectedModule={selectedModule}
+          exploredCount={exploredModules.size}
+          prompt={prompt}
+          onPrompt={handlePrompt}
         />
       </div>
 
-      <ComparisonModal cell={selectedCell} open={comparisonOpen} onClose={() => setComparisonOpen(false)} />
+      <EngineLearningSection />
       <Toast message={toast} />
     </div>
   );

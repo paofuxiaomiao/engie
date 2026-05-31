@@ -1,33 +1,35 @@
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Center, ContactShadows, Float, Html, OrbitControls, RoundedBox, useGLTF, useProgress } from "@react-three/drei";
+import { ContactShadows, Edges, Float, Html, OrbitControls, RoundedBox, useGLTF } from "@react-three/drei";
 import { Suspense, useMemo, useRef } from "react";
 import {
-  Color,
   CatmullRomCurve3,
   DoubleSide,
-  Float32BufferAttribute,
   Group,
+  Material,
   Mesh,
   MeshStandardMaterial,
   TubeGeometry,
   Vector3,
-  type Material,
   type MeshStandardMaterialParameters,
 } from "three";
-import type { CellItem, CellModelAsset, ViewMode } from "../data/cells";
+import { getVehicleModuleById, type ScenePart, type ViewMode } from "../data/vehicle";
 
-type CellSceneProps = {
-  cell: CellItem;
-  activeOrganelle: string;
+const modelAssets = {
+  body: "/models/electric-car-body.glb",
+  engine: "/models/engine-crankshaft.glb",
+  transmission: "/models/transmission-gear.glb",
+};
+
+type VehicleSceneProps = {
+  activeModuleId: string;
   viewMode: ViewMode;
-  crossSection: boolean;
   autoRotate: boolean;
   resetKey: number;
 };
 
-type MaterialProps = {
-  id: string;
-  activeOrganelle: string;
+type PartMaterialProps = {
+  part: ScenePart;
+  activePart: ScenePart;
   viewMode: ViewMode;
   color: string;
   opacity?: number;
@@ -35,203 +37,137 @@ type MaterialProps = {
   metalness?: number;
 };
 
-function CellMaterial({
-  id,
-  activeOrganelle,
+function partOpacity(part: ScenePart, activePart: ScenePart, viewMode: ViewMode, base: number) {
+  if (viewMode === "focus" && part !== activePart) {
+    return Math.min(base, 0.16);
+  }
+
+  if (viewMode === "xray" && part === "body") {
+    return Math.min(base, 0.22);
+  }
+
+  return base;
+}
+
+function PartMaterial({
+  part,
+  activePart,
   viewMode,
   color,
   opacity = 1,
-  roughness = 0.66,
-  metalness = 0.03,
-}: MaterialProps) {
-  const active = id === activeOrganelle;
-  const dimmed = viewMode === "focus" && !active;
+  roughness = 0.54,
+  metalness = 0.08,
+}: PartMaterialProps) {
+  const active = part === activePart;
+  const displayOpacity = partOpacity(part, activePart, viewMode, opacity);
   const material: MeshStandardMaterialParameters = {
     color,
     roughness,
     metalness,
-    transparent: opacity < 1 || dimmed,
-    opacity: dimmed ? Math.min(opacity, 0.18) : opacity,
+    transparent: displayOpacity < 1,
+    opacity: displayOpacity,
     emissive: active ? color : "#000000",
-    emissiveIntensity: active ? 0.34 : 0,
+    emissiveIntensity: active ? 0.18 : 0,
   };
 
   return <meshStandardMaterial {...material} />;
 }
 
-type TubeProps = {
-  id: string;
+type CurveTubeProps = {
+  part: ScenePart;
+  activePart: ScenePart;
+  viewMode: ViewMode;
   color: string;
   points: Array<[number, number, number]>;
   radius?: number;
-  activeOrganelle: string;
-  viewMode: ViewMode;
+  opacity?: number;
 };
 
 function CurveTube({
-  id,
+  part,
+  activePart,
+  viewMode,
   color,
   points,
-  radius = 0.035,
-  activeOrganelle,
-  viewMode,
-}: TubeProps) {
+  radius = 0.025,
+  opacity = 1,
+}: CurveTubeProps) {
   const geometry = useMemo(() => {
-    const curve = new CatmullRomCurve3(
-      points.map((point) => new Vector3(point[0], point[1], point[2])),
-    );
+    const curve = new CatmullRomCurve3(points.map((point) => new Vector3(...point)));
     return new TubeGeometry(curve, 80, radius, 12, false);
   }, [points, radius]);
 
   return (
     <mesh geometry={geometry} castShadow receiveShadow>
-      <CellMaterial
-        id={id}
-        activeOrganelle={activeOrganelle}
+      <PartMaterial
+        part={part}
+        activePart={activePart}
         viewMode={viewMode}
         color={color}
-        roughness={0.58}
+        opacity={opacity}
+        roughness={0.42}
+        metalness={0.05}
       />
     </mesh>
   );
 }
 
-type CommonModelProps = {
-  activeOrganelle: string;
+type LoadedGlbModelProps = {
+  url: string;
+  part: ScenePart;
+  activePart: ScenePart;
   viewMode: ViewMode;
-  crossSection: boolean;
+  tint: string;
+  activeOpacity: number;
+  restOpacity: number;
+  position?: [number, number, number];
+  rotation?: [number, number, number];
+  scale?: [number, number, number];
+  preserveTexture?: boolean;
 };
 
-function applyAssetVertexColors(mesh: Mesh, cell: CellItem) {
-  const geometry = mesh.geometry;
-  const position = geometry.getAttribute("position");
-  if (!position) {
-    return;
-  }
-
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox;
-  if (!box) {
-    return;
-  }
-
-  const sizeX = Math.max(box.max.x - box.min.x, 0.001);
-  const sizeY = Math.max(box.max.y - box.min.y, 0.001);
-  const sizeZ = Math.max(box.max.z - box.min.z, 0.001);
-  const palette = [
-    new Color(cell.color),
-    new Color(cell.accent),
-    ...cell.organelles.map((organelle) => new Color(organelle.color)),
-  ];
-  const highlight = new Color("#fff4d8");
-  const shadow = new Color("#3d4a72");
-  const colors: number[] = [];
-
-  for (let index = 0; index < position.count; index += 1) {
-    const x = position.getX(index);
-    const y = position.getY(index);
-    const z = position.getZ(index);
-    const nx = (x - box.min.x) / sizeX;
-    const ny = (y - box.min.y) / sizeY;
-    const nz = (z - box.min.z) / sizeZ;
-    const flow = Math.sin(nx * 11.6 + ny * 4.8) + Math.cos(ny * 9.4 + nz * 7.2);
-    const paletteIndex = Math.abs(Math.floor((flow + nx * 3.2 + ny * 2.6) * palette.length)) % palette.length;
-    const color = new Color(cell.color).lerp(palette[paletteIndex], 0.48);
-    color.lerp(highlight, Math.max(0, nz - 0.24) * 0.22);
-    color.lerp(shadow, Math.max(0, 0.32 - nz) * 0.12);
-    colors.push(color.r, color.g, color.b);
-  }
-
-  geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
-}
-
-function createAssetMaterial({
-  original,
-  cell,
-  meshIndex,
+function LoadedGlbModel({
+  url,
+  part,
+  activePart,
   viewMode,
-  crossSection,
-}: {
-  original: Mesh["material"];
-  cell: CellItem;
-  meshIndex: number;
-  viewMode: ViewMode;
-  crossSection: boolean;
-}) {
-  const source = Array.isArray(original) ? original[0] : original;
-  const sourceMaterial = source as Partial<MeshStandardMaterial>;
-  const material = new MeshStandardMaterial({
-    color: "#ffffff",
-    map: sourceMaterial.map ?? null,
-    normalMap: sourceMaterial.normalMap ?? null,
-    roughnessMap: sourceMaterial.roughnessMap ?? null,
-    metalnessMap: sourceMaterial.metalnessMap ?? null,
-    side: DoubleSide,
-    vertexColors: true,
-    transparent: crossSection || viewMode === "focus" || sourceMaterial.transparent,
-    opacity: crossSection ? 0.92 : viewMode === "focus" ? 0.95 : sourceMaterial.opacity ?? 1,
-    roughness: Math.min(0.82, sourceMaterial.roughness ?? 0.46),
-    metalness: Math.min(0.12, sourceMaterial.metalness ?? 0.03),
-    emissive: new Color(cell.accent).lerp(new Color("#ffffff"), 0.58),
-    emissiveIntensity: viewMode === "focus" ? 0.045 : 0.016,
-  });
+  tint,
+  activeOpacity,
+  restOpacity,
+  position = [0, 0, 0],
+  rotation = [0, 0, 0],
+  scale = [1, 1, 1],
+  preserveTexture = true,
+}: LoadedGlbModelProps) {
+  const { scene } = useGLTF(url);
+  const opacity = partOpacity(part, activePart, viewMode, part === activePart ? activeOpacity : restOpacity);
+  const active = part === activePart;
 
-  material.envMapIntensity = 0.75 * (cell.modelAsset?.exposure ?? 1);
-  material.needsUpdate = true;
-  return material;
-}
-
-function createNativeAssetMaterial({
-  original,
-  asset,
-  crossSection,
-}: {
-  original: Mesh["material"];
-  asset: CellModelAsset;
-  crossSection: boolean;
-}) {
-  const cloneMaterial = (source: Material) => {
-    const material = source.clone();
-    material.side = DoubleSide;
-    material.transparent = crossSection || material.transparent;
-    material.opacity = crossSection ? Math.min(material.opacity, 0.86) : material.opacity;
-
-    if (material instanceof MeshStandardMaterial) {
-      const displayMap = material.map ?? null;
-      if (displayMap) {
-        displayMap.anisotropy = 8;
-        displayMap.needsUpdate = true;
-      }
-      material.vertexColors = false;
-      material.emissive = new Color("#fff8eb");
-      material.emissiveMap = displayMap;
-      material.emissiveIntensity = 0.07 * (asset.exposure ?? 1);
-      material.envMapIntensity = 0.62 * (asset.exposure ?? 1);
-      material.roughness = Math.max(0.34, Math.min(material.roughness, 0.58));
-      material.metalness = Math.min(material.metalness, 0.08);
-      material.color.setRGB(1.04, 1.035, 1.02);
-    }
-
-    material.needsUpdate = true;
-    return material;
-  };
-
-  return Array.isArray(original) ? original.map(cloneMaterial) : cloneMaterial(original);
-}
-
-function AssetCellModel({
-  cell,
-  asset,
-  viewMode,
-  crossSection,
-}: CommonModelProps & {
-  cell: CellItem;
-  asset: CellModelAsset;
-}) {
-  const { scene } = useGLTF(asset.url);
   const clonedScene = useMemo(() => {
     const clone = scene.clone(true);
-    let meshIndex = 0;
+
+    const prepareMaterial = (source: Material) => {
+      const material = source instanceof MeshStandardMaterial ? source.clone() : new MeshStandardMaterial({ color: tint });
+      material.side = DoubleSide;
+      material.transparent = opacity < 1 || material.transparent;
+      material.opacity = opacity;
+      material.depthWrite = opacity > 0.48;
+
+      if (material instanceof MeshStandardMaterial) {
+        material.roughness = Math.min(0.82, Math.max(0.32, material.roughness || 0.5));
+        material.metalness = Math.min(0.45, Math.max(0.06, material.metalness || 0.08));
+        material.envMapIntensity = active ? 0.92 : 0.56;
+        material.emissive.set(tint);
+        material.emissiveIntensity = active ? 0.06 : 0.015;
+        if (!preserveTexture) {
+          material.map = null;
+          material.color.set(tint);
+        }
+      }
+
+      material.needsUpdate = true;
+      return material;
+    };
 
     clone.traverse((node) => {
       const mesh = node as Mesh;
@@ -241,779 +177,540 @@ function AssetCellModel({
 
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      if (asset.materialMode === "native") {
-        mesh.material = createNativeAssetMaterial({
-          original: mesh.material,
-          asset,
-          crossSection,
-        });
-      } else {
-        mesh.geometry.computeVertexNormals();
-        applyAssetVertexColors(mesh, cell);
-        mesh.material = createAssetMaterial({
-          original: mesh.material,
-          cell,
-          meshIndex,
-          viewMode,
-          crossSection,
-        });
-      }
-      meshIndex += 1;
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map((material) => prepareMaterial(material))
+        : prepareMaterial(mesh.material);
     });
 
     return clone;
-  }, [cell, scene, viewMode, crossSection]);
+  }, [active, opacity, preserveTexture, scene, tint]);
 
-  return (
-    <group
-      position={asset.position ?? [0, 0, 0]}
-      rotation={asset.rotation ?? [0, 0, 0]}
-      scale={[asset.scale, asset.scale, asset.scale]}
-    >
-      <Center>
-        <primitive object={clonedScene} />
-      </Center>
-    </group>
-  );
-}
-
-function Dots({
-  id,
-  color,
-  activeOrganelle,
-  viewMode,
-  count,
-  spread,
-}: CommonModelProps & {
-  id: string;
-  color: string;
-  count: number;
-  spread: [number, number, number];
-}) {
-  const dots = useMemo(
-    () =>
-      Array.from({ length: count }, (_, index) => {
-        const a = index * 1.71;
-        const b = index * 2.37;
-        return [
-          Math.sin(a) * spread[0],
-          Math.cos(b) * spread[1],
-          Math.sin(a + b) * spread[2],
-        ] as [number, number, number];
-      }),
-    [count, spread],
-  );
-
-  return (
-    <>
-      {dots.map((position, index) => (
-        <mesh key={`${id}-${index}`} position={position} castShadow>
-          <sphereGeometry args={[0.055 + (index % 3) * 0.018, 18, 18]} />
-          <CellMaterial
-            id={id}
-            activeOrganelle={activeOrganelle}
-            viewMode={viewMode}
-            color={color}
-            opacity={0.92}
-          />
-        </mesh>
-      ))}
-    </>
-  );
-}
-
-function Nucleus({
-  id = "nucleus",
-  position,
-  scale,
-  activeOrganelle,
-  viewMode,
-  color = "#7047a8",
-}: CommonModelProps & {
-  id?: string;
-  position: [number, number, number];
-  scale: [number, number, number];
-  color?: string;
-}) {
-  return (
-    <group position={position} scale={scale}>
-      <mesh castShadow receiveShadow>
-        <sphereGeometry args={[1, 48, 48]} />
-        <CellMaterial
-          id={id}
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color={color}
-          opacity={0.92}
-          roughness={0.44}
-        />
-      </mesh>
-      <mesh position={[0.2, 0.16, 0.38]} castShadow>
-        <sphereGeometry args={[0.23, 28, 28]} />
-        <CellMaterial
-          id={id}
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#b56ad8"
-          opacity={0.9}
-        />
-      </mesh>
-    </group>
-  );
-}
-
-function Mitochondrion({
-  id = "mitochondrion",
-  position,
-  rotation = [0, 0, 0],
-  scale = [1, 1, 1],
-  activeOrganelle,
-  viewMode,
-}: CommonModelProps & {
-  id?: string;
-  position: [number, number, number];
-  rotation?: [number, number, number];
-  scale?: [number, number, number];
-}) {
   return (
     <group position={position} rotation={rotation} scale={scale}>
-      <mesh castShadow receiveShadow>
-        <capsuleGeometry args={[0.16, 0.46, 10, 24]} />
-        <CellMaterial
-          id={id}
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#cf7042"
-        />
-      </mesh>
-      {[0, 1, 2].map((item) => (
-        <mesh key={item} position={[0, -0.18 + item * 0.18, 0.02]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.09, 0.012, 8, 18]} />
-          <CellMaterial
-            id={id}
-            activeOrganelle={activeOrganelle}
-            viewMode={viewMode}
-            color="#f0b074"
-          />
-        </mesh>
-      ))}
+      <primitive object={clonedScene} />
     </group>
   );
 }
 
-function PlantModel({ activeOrganelle, viewMode, crossSection }: CommonModelProps) {
+function SceneLabel({
+  children,
+  position,
+}: {
+  children: string;
+  position: [number, number, number];
+}) {
   return (
-    <group rotation={[0.1, -0.28, 0]}>
-      <RoundedBox args={[4.7, 2.7, 0.42]} radius={0.18} smoothness={8} position={[0, 0, 0]}>
-        <CellMaterial
-          id="cellWall"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#84ad4a"
-          opacity={crossSection ? 0.34 : 0.5}
-        />
-      </RoundedBox>
-      <RoundedBox args={[4.18, 2.24, 0.24]} radius={0.12} smoothness={8} position={[0.02, 0.02, 0.08]}>
-        <CellMaterial
-          id="cellWall"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#4f9f83"
-          opacity={0.24}
-        />
-      </RoundedBox>
-      <mesh position={[-0.45, -0.12, 0.32]} scale={[1.05, 0.78, 0.28]} castShadow>
-        <sphereGeometry args={[0.78, 46, 46]} />
-        <CellMaterial
-          id="vacuole"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#62bdd2"
-          opacity={0.74}
-        />
-      </mesh>
-      <Nucleus
-        position={[0.92, 0.42, 0.45]}
-        scale={[0.52, 0.52, 0.38]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-      {[
-        [-1.65, 0.48, 0.28],
-        [1.68, -0.38, 0.3],
-        [-1.52, -0.62, 0.22],
-      ].map((position, index) => (
-        <group key={index} position={position as [number, number, number]} rotation={[0, 0, index * 0.7]}>
-          <mesh scale={[0.35, 0.18, 0.12]} castShadow>
-            <sphereGeometry args={[1, 30, 20]} />
-            <CellMaterial
-              id="chloroplast"
-              activeOrganelle={activeOrganelle}
-              viewMode={viewMode}
-              color="#67ad46"
-            />
-          </mesh>
-          <mesh rotation={[Math.PI / 2, 0, 0]} scale={[1, 0.82, 1]}>
-            <torusGeometry args={[0.22, 0.012, 8, 42]} />
-            <CellMaterial
-              id="chloroplast"
-              activeOrganelle={activeOrganelle}
-              viewMode={viewMode}
-              color="#9ed36a"
-            />
-          </mesh>
-        </group>
-      ))}
-      <Mitochondrion
-        position={[0.28, -0.72, 0.42]}
-        rotation={[0.3, 0.2, 1.35]}
-        scale={[0.95, 0.95, 0.95]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-      <CurveTube
-        id="nucleus"
-        color="#ce785c"
-        points={[
-          [0.42, 0.12, 0.42],
-          [0.62, -0.06, 0.5],
-          [1.05, -0.08, 0.46],
-          [1.44, 0.06, 0.38],
-        ]}
-        radius={0.05}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-      />
-      <Dots
-        id="vacuole"
-        color="#c76ac5"
-        count={18}
-        spread={[1.72, 0.92, 0.42]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-    </group>
-  );
-}
-
-function WhiteBloodModel({ activeOrganelle, viewMode, crossSection }: CommonModelProps) {
-  return (
-    <group scale={[1.2, 1.2, 1.2]}>
-      <mesh castShadow receiveShadow>
-        <sphereGeometry args={[1.35, 64, 64]} />
-        <CellMaterial
-          id="membrane"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#d6d7e6"
-          opacity={crossSection ? 0.28 : 0.45}
-        />
-      </mesh>
-      {[
-        [-0.42, 0.22, 0.34],
-        [0.28, 0.06, 0.36],
-        [0.02, -0.42, 0.28],
-      ].map((position, index) => (
-        <Nucleus
-          key={index}
-          id="nucleus"
-          position={position as [number, number, number]}
-          scale={[0.42, 0.36, 0.28]}
-          color="#6c35a0"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          crossSection={crossSection}
-        />
-      ))}
-      <Dots
-        id="granules"
-        color="#c06696"
-        count={30}
-        spread={[1.05, 1.02, 0.72]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-      <Dots
-        id="lysosome"
-        color="#8b54b7"
-        count={12}
-        spread={[0.92, 0.88, 0.62]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-    </group>
-  );
-}
-
-function NeuronModel({ activeOrganelle, viewMode, crossSection }: CommonModelProps) {
-  return (
-    <group rotation={[0.02, -0.2, 0]} scale={[1.05, 1.05, 1.05]}>
-      <Nucleus
-        id="soma"
-        position={[-0.55, 0, 0.08]}
-        scale={[0.64, 0.58, 0.44]}
-        color="#774eb2"
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-      <mesh position={[-0.55, 0, 0]} scale={[0.94, 0.82, 0.62]} castShadow receiveShadow>
-        <sphereGeometry args={[1, 52, 52]} />
-        <CellMaterial
-          id="soma"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#8db5d8"
-          opacity={crossSection ? 0.36 : 0.55}
-        />
-      </mesh>
-      <CurveTube
-        id="axon"
-        color="#6b7dc6"
-        points={[
-          [0.04, 0.02, 0.04],
-          [0.72, -0.02, 0.02],
-          [1.56, 0.04, 0.02],
-          [2.35, -0.04, 0],
-        ]}
-        radius={0.08}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-      />
-      {[0.55, 1.06, 1.58, 2.08].map((x, index) => (
-        <mesh key={index} position={[x, 0, 0.02]} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <capsuleGeometry args={[0.16, 0.24, 8, 24]} />
-          <CellMaterial
-            id="axon"
-            activeOrganelle={activeOrganelle}
-            viewMode={viewMode}
-            color="#bfd1df"
-            opacity={0.94}
-          />
-        </mesh>
-      ))}
-      {[
-        [
-          [-1.08, 0.28, 0],
-          [-1.55, 0.82, 0.08],
-          [-2.1, 1.03, 0],
-        ],
-        [
-          [-1.16, -0.18, 0],
-          [-1.7, -0.54, 0.05],
-          [-2.2, -0.9, 0],
-        ],
-        [
-          [-0.78, 0.58, 0.04],
-          [-0.82, 1.16, 0.02],
-          [-1.12, 1.58, 0],
-        ],
-        [
-          [-0.9, -0.55, 0.04],
-          [-0.92, -1.04, 0],
-          [-1.2, -1.44, 0.02],
-        ],
-      ].map((points, index) => (
-        <CurveTube
-          key={index}
-          id="dendrites"
-          color="#7d9bcf"
-          points={points as Array<[number, number, number]>}
-          radius={0.052}
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-        />
-      ))}
-      <Dots
-        id="dendrites"
-        color="#b46ac7"
-        count={12}
-        spread={[2.2, 1.4, 0.2]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-    </group>
-  );
-}
-
-function EpithelialModel({ activeOrganelle, viewMode, crossSection }: CommonModelProps) {
-  return (
-    <group rotation={[0.08, -0.22, 0]} scale={[1.08, 1.08, 1.08]}>
-      <RoundedBox args={[2.4, 2.0, 0.72]} radius={0.1} smoothness={8} position={[0, -0.12, 0]}>
-        <CellMaterial
-          id="membrane"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#d79baa"
-          opacity={crossSection ? 0.32 : 0.52}
-        />
-      </RoundedBox>
-      {Array.from({ length: 12 }, (_, index) => (
-        <mesh
-          key={index}
-          position={[-1.1 + index * 0.2, 1.04, 0.08]}
-          rotation={[0, 0, 0]}
-          castShadow
-        >
-          <capsuleGeometry args={[0.045, 0.34, 8, 14]} />
-          <CellMaterial
-            id="microvilli"
-            activeOrganelle={activeOrganelle}
-            viewMode={viewMode}
-            color="#c86f80"
-          />
-        </mesh>
-      ))}
-      <Nucleus
-        position={[0.15, -0.2, 0.32]}
-        scale={[0.55, 0.5, 0.36]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-      <CurveTube
-        id="junctions"
-        color="#9f6cbd"
-        points={[
-          [-1.18, 0.74, 0.38],
-          [-0.6, 0.7, 0.44],
-          [0.1, 0.73, 0.4],
-          [0.96, 0.68, 0.42],
-        ]}
-        radius={0.04}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-      />
-      <Dots
-        id="nucleus"
-        color="#d082a2"
-        count={18}
-        spread={[0.96, 0.72, 0.38]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-    </group>
-  );
-}
-
-function BacteriaModel({ activeOrganelle, viewMode, crossSection }: CommonModelProps) {
-  return (
-    <group rotation={[0.02, 0.1, -0.02]} scale={[1.12, 1.12, 1.12]}>
-      <mesh rotation={[0, 0, Math.PI / 2]} castShadow receiveShadow>
-        <capsuleGeometry args={[0.78, 2.9, 14, 48]} />
-        <CellMaterial
-          id="cellWall"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#65b8ae"
-          opacity={crossSection ? 0.36 : 0.62}
-        />
-      </mesh>
-      <mesh rotation={[0, 0, Math.PI / 2]} scale={[0.88, 0.88, 0.82]}>
-        <capsuleGeometry args={[0.62, 2.6, 12, 40]} />
-        <CellMaterial
-          id="cellWall"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#235a74"
-          opacity={0.44}
-        />
-      </mesh>
-      <CurveTube
-        id="nucleoid"
-        color="#7a43ad"
-        points={[
-          [-0.9, 0.12, 0.3],
-          [-0.42, -0.14, 0.38],
-          [0.1, 0.18, 0.34],
-          [0.62, -0.12, 0.36],
-          [1.02, 0.06, 0.32],
-        ]}
-        radius={0.12}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-      />
-      <CurveTube
-        id="flagellum"
-        color="#b87438"
-        points={[
-          [1.82, -0.22, 0.08],
-          [2.35, -0.72, 0],
-          [2.95, -0.5, 0.02],
-          [3.55, -0.95, 0],
-        ]}
-        radius={0.055}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-      />
-      <Dots
-        id="nucleoid"
-        color="#e59b3a"
-        count={34}
-        spread={[1.42, 0.48, 0.36]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-    </group>
-  );
-}
-
-function AnimalModel({ activeOrganelle, viewMode, crossSection }: CommonModelProps) {
-  return (
-    <group rotation={[0.06, -0.34, 0]} scale={[1.08, 1.08, 1.08]}>
-      <mesh scale={[1.7, 1.25, 0.72]} castShadow receiveShadow>
-        <sphereGeometry args={[1, 64, 64]} />
-        <CellMaterial
-          id="membrane"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#9db6dc"
-          opacity={crossSection ? 0.28 : 0.48}
-        />
-      </mesh>
-      <Nucleus
-        position={[0.22, 0.18, 0.36]}
-        scale={[0.55, 0.55, 0.42]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-      <Mitochondrion
-        position={[-0.82, 0.44, 0.32]}
-        rotation={[0.4, 0.1, 1.12]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-      <Mitochondrion
-        position={[0.82, -0.42, 0.25]}
-        rotation={[0.1, 0.35, -0.75]}
-        scale={[0.9, 0.9, 0.9]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-      {[0, 1, 2, 3].map((index) => (
-        <mesh key={index} position={[-0.24 + index * 0.18, -0.56 + index * 0.08, 0.46]} rotation={[0.2, 0, 0.7]}>
-          <torusGeometry args={[0.38 + index * 0.035, 0.025, 10, 52]} />
-          <CellMaterial
-            id="golgi"
-            activeOrganelle={activeOrganelle}
-            viewMode={viewMode}
-            color="#d49057"
-          />
-        </mesh>
-      ))}
-      <Dots
-        id="nucleus"
-        color="#b35fc8"
-        count={28}
-        spread={[1.25, 0.85, 0.46]}
-        activeOrganelle={activeOrganelle}
-        viewMode={viewMode}
-        crossSection={crossSection}
-      />
-    </group>
-  );
-}
-
-function MuscleModel({ activeOrganelle, viewMode, crossSection }: CommonModelProps) {
-  return (
-    <group rotation={[0.15, -0.26, -0.03]} scale={[1.08, 1.08, 1.08]}>
-      <mesh rotation={[0, 0, Math.PI / 2]} scale={[0.95, 1, 0.82]} castShadow receiveShadow>
-        <capsuleGeometry args={[0.76, 2.9, 14, 48]} />
-        <CellMaterial
-          id="sarcolemma"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          color="#d7b284"
-          opacity={crossSection ? 0.26 : 0.42}
-        />
-      </mesh>
-      {[-0.42, 0, 0.42].map((y, row) =>
-        [-0.58, 0.24, 1.06].map((x, index) => (
-          <mesh key={`${row}-${index}`} position={[x, y, 0.15]} rotation={[0, Math.PI / 2, 0]} castShadow>
-            <cylinderGeometry args={[0.13, 0.13, 0.86, 24]} />
-            <CellMaterial
-              id="myofibril"
-              activeOrganelle={activeOrganelle}
-              viewMode={viewMode}
-              color={index % 2 === 0 ? "#bd3d51" : "#cf6272"}
-            />
-          </mesh>
-        )),
-      )}
-      {[-1.1, 1.42].map((x, index) => (
-        <Nucleus
-          key={index}
-          id="mitochondria"
-          position={[x, 0.54 - index * 0.92, 0.36]}
-          scale={[0.26, 0.2, 0.18]}
-          color="#cf7042"
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-          crossSection={crossSection}
-        />
-      ))}
-      {[0, 1, 2, 3, 4].map((index) => (
-        <CurveTube
-          key={index}
-          id="sarcolemma"
-          color="#ead2a7"
-          points={[
-            [-1.55 + index * 0.65, -0.86, 0.26],
-            [-1.45 + index * 0.65, -0.24, 0.34],
-            [-1.55 + index * 0.65, 0.72, 0.28],
-          ]}
-          radius={0.035}
-          activeOrganelle={activeOrganelle}
-          viewMode={viewMode}
-        />
-      ))}
-    </group>
-  );
-}
-
-function CellModel({
-  cell,
-  activeOrganelle,
-  viewMode,
-  crossSection,
-  autoRotate,
-}: Omit<CellSceneProps, "resetKey">) {
-  const group = useRef<Group>(null);
-
-  useFrame((_, delta) => {
-    if (group.current && autoRotate) {
-      group.current.rotation.y += delta * 0.1;
-    }
-  });
-
-  const common = { activeOrganelle, viewMode, crossSection };
-
-  return (
-    <group ref={group} position={[0, 0, 0]}>
-      {cell.modelAsset ? (
-        <AssetCellModel cell={cell} asset={cell.modelAsset} {...common} />
-      ) : (
-        <>
-          {cell.modelKind === "plant" && <PlantModel {...common} />}
-          {cell.modelKind === "whiteBlood" && <WhiteBloodModel {...common} />}
-          {cell.modelKind === "neuron" && <NeuronModel {...common} />}
-          {cell.modelKind === "epithelial" && <EpithelialModel {...common} />}
-          {cell.modelKind === "bacteria" && <BacteriaModel {...common} />}
-          {cell.modelKind === "animal" && <AnimalModel {...common} />}
-          {cell.modelKind === "muscle" && <MuscleModel {...common} />}
-        </>
-      )}
-    </group>
-  );
-}
-
-function ModelLoadingOverlay({ cell }: { cell: CellItem }) {
-  const { progress } = useProgress();
-  const displayProgress = Math.max(8, Math.min(100, Math.round(progress)));
-
-  return (
-    <Html center className="model-loader">
-      <div>
-        <span>Loading 3D specimen</span>
-        <strong>{cell.name}</strong>
-        <i>
-          <b style={{ width: `${displayProgress}%` }} />
-        </i>
-        <em>{displayProgress}%</em>
-      </div>
+    <Html position={position} center className="scene-label" distanceFactor={8}>
+      <span>{children}</span>
     </Html>
   );
 }
 
-export function CellScene({
-  cell,
-  activeOrganelle,
+function RealModelCluster({
+  activePart,
   viewMode,
-  crossSection,
-  autoRotate,
-  resetKey,
-}: CellSceneProps) {
-  const nativeMaterial = cell.modelAsset?.materialMode === "native";
+}: {
+  activePart: ScenePart;
+  viewMode: ViewMode;
+}) {
+  return (
+    <group>
+      <SceneLabel position={[0, 1.62, 0]}>实拍 / Tripo 模型组</SceneLabel>
+      <LoadedGlbModel
+        url={modelAssets.body}
+        part="body"
+        activePart={activePart}
+        viewMode={viewMode}
+        tint="#f8fcff"
+        activeOpacity={viewMode === "assembled" ? 0.82 : 0.42}
+        restOpacity={0.32}
+        position={[0, 0.46, -0.18]}
+        rotation={[0, Math.PI / 2, 0]}
+        scale={[2.45, 2.16, 3.1]}
+      />
 
+      <LoadedGlbModel
+        url={modelAssets.engine}
+        part="drive"
+        activePart={activePart}
+        viewMode={viewMode}
+        tint="#f28c28"
+        activeOpacity={0.98}
+        restOpacity={0.3}
+        position={[-0.82, -0.22, 0.64]}
+        rotation={[0, Math.PI / 2, 0]}
+        scale={[1.45, 0.78, 0.56]}
+        preserveTexture={false}
+      />
+
+      <LoadedGlbModel
+        url={modelAssets.transmission}
+        part="drive"
+        activePart={activePart}
+        viewMode={viewMode}
+        tint="#f28c28"
+        activeOpacity={0.96}
+        restOpacity={0.3}
+        position={[0.86, -0.2, 0.64]}
+        rotation={[0.12, -0.55, 0]}
+        scale={[0.62, 0.62, 0.62]}
+      />
+
+      <CurveTube
+        part="drive"
+        activePart={activePart}
+        viewMode={viewMode}
+        color="#ff8f1f"
+        opacity={0.62}
+        radius={0.014}
+        points={[
+          [-0.42, -0.16, 0.64],
+          [0.05, -0.12, 0.76],
+          [0.52, -0.16, 0.66],
+        ]}
+      />
+
+      <CurveTube
+        part="body"
+        activePart={activePart}
+        viewMode={viewMode}
+        color="#0f8fb3"
+        opacity={0.48}
+        radius={0.01}
+        points={[
+          [-1.46, 1.03, -0.54],
+          [-0.72, 1.28, -0.62],
+          [0.42, 1.2, -0.58],
+          [1.42, 0.74, -0.5],
+        ]}
+      />
+    </group>
+  );
+}
+
+function AbstractBodyShell({
+  activePart,
+  viewMode,
+}: {
+  activePart: ScenePart;
+  viewMode: ViewMode;
+}) {
+  const shellOpacity = viewMode === "assembled" ? 0.48 : 0.2;
+
+  return (
+    <group>
+      <RoundedBox args={[5.2, 0.72, 1.72]} radius={0.22} smoothness={12} position={[0, 0.25, 0]}>
+        <PartMaterial
+          part="body"
+          activePart={activePart}
+          viewMode={viewMode}
+          color="#eff7fb"
+          opacity={shellOpacity}
+          roughness={0.22}
+          metalness={0.12}
+        />
+        <Edges color={activePart === "body" ? "#0f8fb3" : "#9cc8d5"} />
+      </RoundedBox>
+
+      <RoundedBox args={[2.25, 0.78, 1.42]} radius={0.28} smoothness={12} position={[-0.28, 0.82, 0]}>
+        <PartMaterial
+          part="body"
+          activePart={activePart}
+          viewMode={viewMode}
+          color="#f7fbfd"
+          opacity={viewMode === "assembled" ? 0.42 : 0.18}
+          roughness={0.18}
+          metalness={0.08}
+        />
+        <Edges color={activePart === "body" ? "#0f8fb3" : "#b5d5dd"} />
+      </RoundedBox>
+
+      <RoundedBox args={[1.24, 0.28, 1.5]} radius={0.15} smoothness={10} position={[-2.25, 0.4, 0]}>
+        <PartMaterial part="body" activePart={activePart} viewMode={viewMode} color="#f3f8fb" opacity={0.38} />
+      </RoundedBox>
+      <RoundedBox args={[1.22, 0.26, 1.48]} radius={0.15} smoothness={10} position={[2.16, 0.38, 0]}>
+        <PartMaterial part="body" activePart={activePart} viewMode={viewMode} color="#f3f8fb" opacity={0.36} />
+      </RoundedBox>
+
+      <CurveTube
+        part="body"
+        activePart={activePart}
+        viewMode={viewMode}
+        color="#0f8fb3"
+        opacity={0.78}
+        radius={0.012}
+        points={[
+          [-2.45, 0.92, -0.88],
+          [-1.32, 1.28, -0.9],
+          [0.18, 1.33, -0.9],
+          [1.56, 0.98, -0.9],
+          [2.46, 0.62, -0.88],
+        ]}
+      />
+      <CurveTube
+        part="body"
+        activePart={activePart}
+        viewMode={viewMode}
+        color="#0f8fb3"
+        opacity={0.52}
+        radius={0.01}
+        points={[
+          [-2.52, 0.78, 0.88],
+          [-1.42, 1.16, 0.9],
+          [0.24, 1.22, 0.9],
+          [1.52, 0.88, 0.9],
+          [2.46, 0.55, 0.88],
+        ]}
+      />
+    </group>
+  );
+}
+
+function BatteryPack({
+  activePart,
+  viewMode,
+}: {
+  activePart: ScenePart;
+  viewMode: ViewMode;
+}) {
+  const cells = Array.from({ length: 24 }, (_, index) => {
+    const column = index % 8;
+    const row = Math.floor(index / 8);
+    return [-1.4 + column * 0.4, -0.12, -0.42 + row * 0.42] as [number, number, number];
+  });
+
+  return (
+    <group>
+      <RoundedBox args={[3.46, 0.18, 1.32]} radius={0.08} smoothness={8} position={[0, -0.16, 0]}>
+        <PartMaterial part="battery" activePart={activePart} viewMode={viewMode} color="#dff8fc" opacity={0.86} />
+        <Edges color="#11a8c7" />
+      </RoundedBox>
+      {cells.map((position, index) => (
+        <RoundedBox key={index} args={[0.32, 0.08, 0.32]} radius={0.035} smoothness={6} position={position}>
+          <PartMaterial
+            part="battery"
+            activePart={activePart}
+            viewMode={viewMode}
+            color={index % 2 === 0 ? "#62d7e8" : "#9ee7f0"}
+            opacity={0.92}
+            roughness={0.38}
+          />
+        </RoundedBox>
+      ))}
+      <RoundedBox args={[3.7, 0.08, 1.48]} radius={0.04} smoothness={4} position={[0, -0.31, 0]}>
+        <PartMaterial part="battery" activePart={activePart} viewMode={viewMode} color="#41576b" opacity={0.42} />
+      </RoundedBox>
+    </group>
+  );
+}
+
+function DriveUnits({
+  activePart,
+  viewMode,
+}: {
+  activePart: ScenePart;
+  viewMode: ViewMode;
+}) {
+  const unitPositions: Array<[number, number, number]> = [
+    [-2.02, -0.04, 0],
+    [1.92, -0.04, 0],
+  ];
+
+  return (
+    <group>
+      {unitPositions.map((position, index) => (
+        <group key={index} position={position}>
+          <RoundedBox args={[0.64, 0.34, 0.78]} radius={0.08} smoothness={8}>
+            <PartMaterial part="drive" activePart={activePart} viewMode={viewMode} color="#e8edf1" opacity={0.92} />
+            <Edges color="#f28c28" />
+          </RoundedBox>
+          <mesh position={[0, 0.03, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.24, 0.24, 0.64, 32]} />
+            <PartMaterial part="drive" activePart={activePart} viewMode={viewMode} color="#f28c28" opacity={0.96} />
+          </mesh>
+          <RoundedBox args={[0.3, 0.22, 0.3]} radius={0.04} smoothness={5} position={[0.34, 0.12, 0.26]}>
+            <PartMaterial part="drive" activePart={activePart} viewMode={viewMode} color="#8ec642" opacity={0.94} />
+          </RoundedBox>
+        </group>
+      ))}
+
+      <CurveTube
+        part="drive"
+        activePart={activePart}
+        viewMode={viewMode}
+        color="#ff8f1f"
+        radius={0.03}
+        points={[
+          [-1.82, 0.03, 0.18],
+          [-1.18, 0.02, 0.52],
+          [-0.25, -0.02, 0.58],
+          [0.55, -0.02, 0.55],
+          [1.68, 0.05, 0.2],
+        ]}
+      />
+      <CurveTube
+        part="drive"
+        activePart={activePart}
+        viewMode={viewMode}
+        color="#ff8f1f"
+        radius={0.025}
+        points={[
+          [-1.95, -0.02, -0.32],
+          [-0.9, -0.1, -0.58],
+          [0.35, -0.11, -0.58],
+          [1.76, -0.02, -0.3],
+        ]}
+      />
+    </group>
+  );
+}
+
+function WheelAssembly({
+  x,
+  z,
+  activePart,
+  viewMode,
+}: {
+  x: number;
+  z: number;
+  activePart: ScenePart;
+  viewMode: ViewMode;
+}) {
+  const springPoints = useMemo(
+    () =>
+      Array.from({ length: 36 }, (_, index) => {
+        const t = index / 35;
+        const angle = t * Math.PI * 7;
+        return [
+          x + Math.sin(angle) * 0.08,
+          0.08 + t * 0.66,
+          z + Math.cos(angle) * 0.08,
+        ] as [number, number, number];
+      }),
+    [x, z],
+  );
+
+  return (
+    <group>
+      <mesh position={[x, -0.14, z]} rotation={[0, Math.PI / 2, 0]} castShadow receiveShadow>
+        <torusGeometry args={[0.37, 0.08, 18, 48]} />
+        <PartMaterial part="chassis" activePart={activePart} viewMode={viewMode} color="#151d25" opacity={0.96} />
+      </mesh>
+      <mesh position={[x, -0.14, z]} rotation={[0, Math.PI / 2, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.24, 0.24, 0.08, 36]} />
+        <PartMaterial part="chassis" activePart={activePart} viewMode={viewMode} color="#ccd4dc" opacity={0.98} />
+      </mesh>
+      <RoundedBox args={[0.1, 0.22, 0.08]} radius={0.03} smoothness={5} position={[x, -0.12, z > 0 ? z - 0.2 : z + 0.2]}>
+        <PartMaterial part="chassis" activePart={activePart} viewMode={viewMode} color="#f2a51f" opacity={0.98} />
+      </RoundedBox>
+      <CurveTube
+        part="chassis"
+        activePart={activePart}
+        viewMode={viewMode}
+        color="#4b5f76"
+        radius={0.018}
+        points={springPoints}
+      />
+      <CurveTube
+        part="chassis"
+        activePart={activePart}
+        viewMode={viewMode}
+        color="#66778a"
+        radius={0.022}
+        points={[
+          [x, 0.1, z],
+          [x * 0.78, -0.08, z * 0.58],
+          [x * 0.55, -0.16, z * 0.26],
+        ]}
+      />
+    </group>
+  );
+}
+
+function Chassis({
+  activePart,
+  viewMode,
+}: {
+  activePart: ScenePart;
+  viewMode: ViewMode;
+}) {
+  return (
+    <group>
+      {[-0.68, 0.68].map((z) => (
+        <RoundedBox key={z} args={[4.45, 0.08, 0.08]} radius={0.025} smoothness={4} position={[0, -0.24, z]}>
+          <PartMaterial part="chassis" activePart={activePart} viewMode={viewMode} color="#53677b" opacity={0.72} />
+        </RoundedBox>
+      ))}
+      {[-1.7, 1.7].map((x) => (
+        <RoundedBox key={x} args={[0.12, 0.08, 1.5]} radius={0.025} smoothness={4} position={[x, -0.22, 0]}>
+          <PartMaterial part="chassis" activePart={activePart} viewMode={viewMode} color="#53677b" opacity={0.72} />
+        </RoundedBox>
+      ))}
+      {[-1.75, 1.75].flatMap((x) =>
+        [-0.92, 0.92].map((z) => (
+          <WheelAssembly key={`${x}-${z}`} x={x} z={z} activePart={activePart} viewMode={viewMode} />
+        )),
+      )}
+    </group>
+  );
+}
+
+function AdasSensors({
+  activePart,
+  viewMode,
+}: {
+  activePart: ScenePart;
+  viewMode: ViewMode;
+}) {
+  return (
+    <group>
+      <mesh position={[-0.1, 1.46, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.19, 0.2, 0.14, 36]} />
+        <PartMaterial part="adas" activePart={activePart} viewMode={viewMode} color="#1fb66f" opacity={0.96} />
+      </mesh>
+      <RoundedBox args={[0.56, 0.12, 0.16]} radius={0.04} smoothness={5} position={[-0.85, 1.18, -0.03]}>
+        <PartMaterial part="adas" activePart={activePart} viewMode={viewMode} color="#203744" opacity={0.96} />
+      </RoundedBox>
+      {[
+        [-2.62, 0.36, 0],
+        [-0.62, 0.64, -0.9],
+        [-0.62, 0.64, 0.9],
+        [2.42, 0.56, -0.72],
+        [2.42, 0.56, 0.72],
+      ].map((position, index) => (
+        <mesh key={index} position={position as [number, number, number]} castShadow receiveShadow>
+          <sphereGeometry args={[0.08, 20, 20]} />
+          <PartMaterial part="adas" activePart={activePart} viewMode={viewMode} color="#20b66f" opacity={0.95} />
+        </mesh>
+      ))}
+      {[0, 1, 2].map((index) => (
+        <CurveTube
+          key={index}
+          part="adas"
+          activePart={activePart}
+          viewMode={viewMode}
+          color="#20b66f"
+          opacity={0.42}
+          radius={0.008}
+          points={[
+            [-0.1, 1.5, 0],
+            [0.45 + index * 0.16, 1.68 + index * 0.04, 0.16 - index * 0.16],
+            [1.45 + index * 0.32, 1.44, 0.44 - index * 0.44],
+          ]}
+        />
+      ))}
+    </group>
+  );
+}
+
+function Cockpit({
+  activePart,
+  viewMode,
+}: {
+  activePart: ScenePart;
+  viewMode: ViewMode;
+}) {
+  const seats: Array<[number, number, number]> = [
+    [-0.55, 0.42, -0.34],
+    [-0.55, 0.42, 0.34],
+    [0.45, 0.36, -0.34],
+    [0.45, 0.36, 0.34],
+  ];
+
+  return (
+    <group>
+      {seats.map((position, index) => (
+        <group key={index} position={position}>
+          <RoundedBox args={[0.28, 0.38, 0.24]} radius={0.06} smoothness={7}>
+            <PartMaterial part="cockpit" activePart={activePart} viewMode={viewMode} color="#d8dce8" opacity={0.86} />
+          </RoundedBox>
+          <RoundedBox args={[0.24, 0.42, 0.22]} radius={0.05} smoothness={7} position={[0.08, 0.26, 0]}>
+            <PartMaterial part="cockpit" activePart={activePart} viewMode={viewMode} color="#b9c0d4" opacity={0.82} />
+          </RoundedBox>
+        </group>
+      ))}
+      <RoundedBox args={[0.1, 0.42, 0.62]} radius={0.04} smoothness={5} position={[-1.0, 0.72, 0]}>
+        <PartMaterial part="cockpit" activePart={activePart} viewMode={viewMode} color="#101b2a" opacity={0.92} />
+      </RoundedBox>
+      <RoundedBox args={[0.08, 0.32, 0.5]} radius={0.04} smoothness={5} position={[-0.92, 0.72, -0.16]}>
+        <PartMaterial part="cockpit" activePart={activePart} viewMode={viewMode} color="#7c5cff" opacity={0.72} />
+      </RoundedBox>
+      <mesh position={[-1.18, 0.52, -0.28]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
+        <torusGeometry args={[0.13, 0.014, 10, 32]} />
+        <PartMaterial part="cockpit" activePart={activePart} viewMode={viewMode} color="#1d2835" opacity={0.96} />
+      </mesh>
+    </group>
+  );
+}
+
+function VehicleModel({
+  activeModuleId,
+  viewMode,
+  autoRotate,
+}: Omit<VehicleSceneProps, "resetKey">) {
+  const group = useRef<Group>(null);
+  const activePart = getVehicleModuleById(activeModuleId).scenePart;
+
+  useFrame((_, delta) => {
+    if (group.current && autoRotate) {
+      group.current.rotation.y += delta * 0.08;
+    }
+  });
+
+  return (
+    <group ref={group} rotation={[0.02, -0.2, 0]} position={[0, -0.12, 0]}>
+      <group position={[-2.35, 0.02, 0]}>
+        <RealModelCluster activePart={activePart} viewMode={viewMode} />
+      </group>
+
+      <group position={[2.2, -0.04, 0]} scale={[0.62, 0.62, 0.62]}>
+        <SceneLabel position={[0, 1.88, 0]}>抽象结构示意</SceneLabel>
+        <AbstractBodyShell activePart={activePart} viewMode={viewMode} />
+        <BatteryPack activePart={activePart} viewMode={viewMode} />
+        <DriveUnits activePart={activePart} viewMode={viewMode} />
+        <Chassis activePart={activePart} viewMode={viewMode} />
+        <AdasSensors activePart={activePart} viewMode={viewMode} />
+        <Cockpit activePart={activePart} viewMode={viewMode} />
+      </group>
+    </group>
+  );
+}
+
+export function VehicleScene({ activeModuleId, viewMode, autoRotate, resetKey }: VehicleSceneProps) {
   return (
     <Canvas
       key={resetKey}
-      className={`cell-canvas${nativeMaterial ? " is-native-asset" : ""}`}
+      className="vehicle-canvas"
       dpr={[1, 2]}
       shadows
       gl={{ antialias: true, alpha: true, premultipliedAlpha: false }}
-      camera={{ position: [0, 0.2, 5.8], fov: 38 }}
+      camera={{ position: [0, 1.32, 7.4], fov: 38 }}
     >
-      {!nativeMaterial && <color attach="background" args={["#fbf7ee"]} />}
-      <ambientLight intensity={nativeMaterial ? 1.42 : 1.28} />
-      <hemisphereLight
-        args={[
-          nativeMaterial ? "#fffaf0" : "#fff8ea",
-          nativeMaterial ? "#efe3d2" : "#e3ded2",
-          nativeMaterial ? 1.26 : 1.18,
-        ]}
-      />
-      <directionalLight
-        position={[4.2, 5.2, 5.8]}
-        intensity={nativeMaterial ? 2.72 : 2.75}
-        castShadow
-      />
-      {nativeMaterial && (
-        <directionalLight
-          position={[-4.4, 2.2, 3.6]}
-          intensity={0.82}
-          color="#fff1df"
-        />
-      )}
-      <spotLight
-        position={[-3.6, 3.2, 4.6]}
-        angle={0.42}
-        penumbra={0.74}
-        intensity={nativeMaterial ? 0.78 : 1.45}
-        color={nativeMaterial ? "#fff8ec" : cell.accentSoft}
-      />
-      <pointLight
-        position={[2.8, -1.2, 3.2]}
-        intensity={nativeMaterial ? 0.46 : 0.6}
-        color={nativeMaterial ? "#ffffff" : cell.accent}
-      />
-      <Suspense fallback={<ModelLoadingOverlay cell={cell} />}>
-        <Float speed={1.25} rotationIntensity={0.08} floatIntensity={0.18}>
-          <CellModel
-            cell={cell}
-            activeOrganelle={activeOrganelle}
-            viewMode={viewMode}
-            crossSection={crossSection}
-            autoRotate={autoRotate}
-          />
+      <color attach="background" args={["#ffffff"]} />
+      <ambientLight intensity={1.4} />
+      <hemisphereLight args={["#ffffff", "#dce7ee", 1.18]} />
+      <directionalLight position={[4.5, 5.6, 5.2]} intensity={2.8} castShadow />
+      <directionalLight position={[-4.2, 2.4, -3.8]} intensity={0.85} color="#d7f8ff" />
+      <pointLight position={[1.8, 0.6, 3.4]} intensity={0.72} color="#11a8c7" />
+      <Suspense fallback={null}>
+        <Float speed={1.08} rotationIntensity={0.04} floatIntensity={0.06}>
+          <VehicleModel activeModuleId={activeModuleId} viewMode={viewMode} autoRotate={autoRotate} />
         </Float>
-        <ContactShadows
-          position={[0, -1.8, 0]}
-          opacity={nativeMaterial ? 0.18 : 0.26}
-          scale={nativeMaterial ? 7.8 : 7.2}
-          blur={nativeMaterial ? 3.2 : 2.4}
-          far={4.2}
-        />
       </Suspense>
+      <gridHelper args={[9.6, 24, "#d9eef4", "#edf4f7"]} position={[0, -0.68, 0]} />
+      <ContactShadows position={[0, -0.66, 0]} opacity={0.2} scale={9.2} blur={3} far={3.8} />
       <OrbitControls
         makeDefault
         enableDamping
         dampingFactor={0.08}
         enablePan
-        minDistance={3.2}
-        maxDistance={8.4}
+        minDistance={4.6}
+        maxDistance={10.2}
       />
     </Canvas>
   );
 }
+
+useGLTF.preload(modelAssets.body);
+useGLTF.preload(modelAssets.engine);
+useGLTF.preload(modelAssets.transmission);

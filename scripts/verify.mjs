@@ -1,11 +1,15 @@
 import { mkdir } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { PNG } from "pngjs";
 
-const url = process.env.APP_URL ?? "http://127.0.0.1:5173/";
+const defaultUrl = "http://127.0.0.1:5173/";
+const url = process.env.APP_URL ?? defaultUrl;
+const shouldStartServer = !process.env.APP_URL;
 const chromePath =
   process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const rootDir = fileURLToPath(new URL("../", import.meta.url));
 const outDir = new URL("../verification/", import.meta.url);
 
 function outPath(fileName) {
@@ -18,19 +22,44 @@ function assert(value, message) {
   }
 }
 
+async function waitForServer(targetUrl, timeoutMs = 20_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const response = await fetch(targetUrl);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    }
+  }
+  throw new Error(`dev server did not respond at ${targetUrl}`);
+}
+
+function startDevServer() {
+  const viteBin = fileURLToPath(new URL("../node_modules/.bin/vite", import.meta.url));
+  const child = spawn(viteBin, ["--host", "127.0.0.1", "--port", "5173"], {
+    cwd: rootDir,
+    stdio: "ignore",
+    env: { ...process.env, BROWSER: "none" },
+  });
+
+  return child;
+}
+
 async function readVisualMetrics(page, selector) {
   const box = await page.locator(selector).boundingBox();
   const buffer = await page.locator(selector).screenshot();
   const png = PNG.sync.read(buffer);
-  const left = Math.floor(png.width * 0.18);
-  const right = Math.floor(png.width * 0.82);
-  const top = Math.floor(png.height * 0.16);
+  const left = Math.floor(png.width * 0.16);
+  const right = Math.floor(png.width * 0.84);
+  const top = Math.floor(png.height * 0.14);
   const bottom = Math.floor(png.height * 0.86);
 
-  let nonPaper = 0;
+  let nonWhite = 0;
   let sum = 0;
   let sumSquares = 0;
-  let alphaPixels = 0;
   let count = 0;
 
   for (let y = top; y < bottom; y += 1) {
@@ -39,13 +68,9 @@ async function readVisualMetrics(page, selector) {
       const r = png.data[index];
       const g = png.data[index + 1];
       const b = png.data[index + 2];
-      const a = png.data[index + 3];
       const brightness = (r + g + b) / 3;
-      if (a > 0) {
-        alphaPixels += 1;
-      }
-      if (Math.abs(r - 251) + Math.abs(g - 247) + Math.abs(b - 238) > 26) {
-        nonPaper += 1;
+      if (Math.abs(r - 255) + Math.abs(g - 255) + Math.abs(b - 255) > 34) {
+        nonWhite += 1;
       }
       sum += brightness;
       sumSquares += brightness * brightness;
@@ -59,8 +84,7 @@ async function readVisualMetrics(page, selector) {
   return {
     width: box?.width ?? png.width,
     height: box?.height ?? png.height,
-    alphaRatio: alphaPixels / count,
-    nonPaperRatio: nonPaper / count,
+    nonWhiteRatio: nonWhite / count,
     variance,
   };
 }
@@ -68,101 +92,79 @@ async function readVisualMetrics(page, selector) {
 async function verifyViewport(browser, name, viewport) {
   const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
   await page.goto(url, { waitUntil: "networkidle" });
-  await page.waitForSelector("canvas", { timeout: 15000 });
-  await page.waitForTimeout(1600);
+  await page.waitForSelector("canvas", { timeout: 15_000 });
+  await page.waitForTimeout(1_200);
 
   const title = await page.locator(".stage-title h2").innerText();
-  const cellCount = await page.locator(".cell-row").count();
-  const tutorText = await page.locator(".learning-panel").innerText();
-  const modeTitles = await page.locator(".mode-switcher button").evaluateAll((buttons) =>
-    buttons.map((button) => button.getAttribute("title")),
-  );
-  const activeMode = await page.locator(".mode-switcher button.is-active").getAttribute("title");
+  const moduleCount = await page.locator(".module-row").count();
+  const modeTitles = await page
+    .locator(".mode-switcher button")
+    .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("title")));
+  const engineCardCount = await page.locator(".engine-card").count();
   const visualBox = await page.locator("canvas").boundingBox();
-  await page.screenshot({ path: outPath(`${name}.png`), fullPage: true });
-  await page.locator("canvas").screenshot({ path: outPath(`${name}-visual.png`) });
+  const cutawayBox = await page.locator(".cutaway-panel img").boundingBox();
+  const firstEngineBox = await page.locator(".engine-card img").first().boundingBox();
   const metrics = await readVisualMetrics(page, "canvas");
 
-  assert(title.includes("Animal Cell"), `${name}: initial title mismatch`);
-  assert(cellCount === 7, `${name}: expected 7 cells, received ${cellCount}`);
-  assert(tutorText.toLowerCase().includes("ai tutor"), `${name}: AI tutor panel is missing`);
-  assert(tutorText.toLowerCase().includes("mastery"), `${name}: mastery tracker is missing`);
-  assert(activeMode === "Mesh", `${name}: default mode should be Mesh`);
-  assert(modeTitles.length === 2 && modeTitles.includes("Mesh") && modeTitles.includes("Focus"), `${name}: unexpected mode buttons`);
-  assert(visualBox && visualBox.width > 260 && visualBox.height > 220, `${name}: visual is too small`);
+  await page.screenshot({ path: outPath(`${name}.png`), fullPage: true });
+  await page.locator("canvas").screenshot({ path: outPath(`${name}-visual.png`) });
+
+  assert(title.includes("SU7 风格纯电轿跑"), `${name}: vehicle title mismatch`);
+  assert(moduleCount === 6, `${name}: expected 6 modules, received ${moduleCount}`);
   assert(
-    visualBox.y > 0 && visualBox.y + visualBox.height < viewport.height - 8,
-    `${name}: canvas falls outside the viewport`,
+    modeTitles.includes("整车") && modeTitles.includes("透视") && modeTitles.includes("聚焦"),
+    `${name}: missing view mode controls`,
   );
-  assert(metrics, `${name}: missing visual metrics`);
-  assert(metrics.nonPaperRatio > 0.05, `${name}: visual appears blank`);
-  assert(metrics.variance > 120, `${name}: visual has too little pixel variation`);
+  assert(engineCardCount === 4, `${name}: expected 4 engine learning cards, received ${engineCardCount}`);
+  assert(visualBox && visualBox.width > 260 && visualBox.height > 220, `${name}: visual is too small`);
+  assert(cutawayBox && cutawayBox.width > 260 && cutawayBox.height > 130, `${name}: cutaway image is too small`);
+  assert(firstEngineBox && firstEngineBox.width > 260 && firstEngineBox.height > 130, `${name}: engine image is too small`);
+  assert(metrics.nonWhiteRatio > 0.035, `${name}: 3D visual appears blank`);
+  assert(metrics.variance > 80, `${name}: 3D visual has too little pixel variation`);
+
   await page.close();
 
-  return { name, title, cellCount, activeMode, modeTitles, visualBox, metrics };
+  return { name, title, moduleCount, modeTitles, engineCardCount, visualBox, cutawayBox, firstEngineBox, metrics };
 }
 
 async function verifyInteractions(browser) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
   await page.goto(url, { waitUntil: "networkidle" });
-  await page.waitForSelector("canvas", { timeout: 15000 });
-  await page.waitForTimeout(600);
+  await page.waitForSelector("canvas", { timeout: 15_000 });
+  await page.waitForTimeout(700);
 
-  await page.locator(".cell-row").filter({ hasText: "Plant Cell" }).click();
-  await page.waitForSelector("canvas", { timeout: 15000 });
-  await page.waitForTimeout(7000);
-  const plantModelMetrics = await readVisualMetrics(page, "canvas");
-  assert(plantModelMetrics.nonPaperRatio > 0.05, "plant GLB appears blank");
-  assert(plantModelMetrics.variance > 120, "plant GLB has too little pixel variation");
+  for (const label of ["电池与 CTB 底盘", "电驱与电控", "智能驾驶感知"]) {
+    await page.locator(".module-row").filter({ hasText: label }).click();
+    await page.waitForTimeout(400);
+    const detailTitle = await page.locator(".detail-hero h3").innerText();
+    assert(detailTitle.includes(label), `detail panel did not update for ${label}`);
+    const bannerText = await page.locator(".selected-banner").innerText();
+    assert(bannerText.includes(label), `stage banner did not update for ${label}`);
+  }
 
-  await page.locator(".cell-row").filter({ hasText: "White Blood Cell" }).click();
-  await page.waitForSelector("canvas", { timeout: 15000 });
-  await page.waitForTimeout(7000);
-  const whiteBloodModelMetrics = await readVisualMetrics(page, "canvas");
-  assert(whiteBloodModelMetrics.nonPaperRatio > 0.05, "white blood GLB appears blank");
-  assert(whiteBloodModelMetrics.variance > 120, "white blood GLB has too little pixel variation");
-
-  await page.locator(".cell-row").filter({ hasText: "Bacteria Cell" }).click();
-  await page.waitForSelector("canvas", { timeout: 15000 });
-  await page.waitForTimeout(800);
-
-  const title = await page.locator(".stage-title h2").innerText();
-  assert(title.includes("Bacteria Cell"), "cell switch did not update title");
-  const bacteriaMeshMetrics = await readVisualMetrics(page, "canvas");
-  assert(bacteriaMeshMetrics.nonPaperRatio > 0.05, "bacteria mesh appears blank");
-  assert(bacteriaMeshMetrics.variance > 120, "bacteria mesh has too little pixel variation");
-
-  await page.locator(".organelle-row").filter({ hasText: "Flagellum" }).click();
-  await page.waitForTimeout(250);
-  const detailTitle = await page.locator(".detail-hero h3").innerText();
-  assert(detailTitle.includes("Flagellum"), "organelle switch did not update details");
-
-  await page.locator(".prompt-list button").first().click();
-  await page.waitForTimeout(250);
-  const tutorPrompt = await page.locator(".tutor-prompt p").innerText();
-  assert(tutorPrompt.includes("Flagellum"), "AI tutor prompt did not update");
-
-  await page.getByRole("button", { name: /Open Comparison View/ }).click();
-  await page.waitForTimeout(250);
-  const modalTitle = await page.locator(".comparison-modal h3").innerText();
-  assert(modalTitle.includes("Comparison View"), "comparison modal did not open");
+  for (const mode of ["透视", "聚焦", "整车"]) {
+    await page.locator(".mode-switcher button").filter({ hasText: mode }).click();
+    await page.waitForTimeout(500);
+    const activeMode = await page.locator(".mode-switcher button.is-active").getAttribute("title");
+    assert(activeMode === mode, `active mode mismatch for ${mode}`);
+    const metrics = await readVisualMetrics(page, "canvas");
+    assert(metrics.nonWhiteRatio > 0.03, `${mode}: visual appears blank after mode switch`);
+  }
 
   await page.screenshot({ path: outPath("interaction.png"), fullPage: true });
   await page.locator("canvas").screenshot({ path: outPath("interaction-canvas.png") });
   await page.close();
 
-  return {
-    title,
-    detailTitle,
-    tutorPrompt,
-    modalTitle,
-    plantModelMetrics,
-    whiteBloodModelMetrics,
-    bacteriaMeshMetrics,
-  };
+  return { ok: true };
 }
 
 await mkdir(outDir, { recursive: true });
+
+let server;
+if (shouldStartServer) {
+  server = startDevServer();
+  await waitForServer(url);
+}
 
 const browser = await chromium.launch({
   executablePath: chromePath,
@@ -202,4 +204,7 @@ try {
   );
 } finally {
   await browser.close();
+  if (server) {
+    server.kill("SIGTERM");
+  }
 }
