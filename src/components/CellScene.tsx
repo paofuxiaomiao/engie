@@ -14,10 +14,12 @@ import {
 } from "three";
 import { getVehicleModuleById, type ScenePart, type ViewMode } from "../data/vehicle";
 
+const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path}`;
+
 const modelAssets = {
-  body: "/models/electric-car-body.glb",
-  engine: "/models/engine-crankshaft.glb",
-  transmission: "/models/transmission-gear.glb",
+  body: assetPath("models/electric-car-body.glb"),
+  engine: assetPath("models/engine-crankshaft.glb"),
+  transmission: assetPath("models/transmission-gear.glb"),
 };
 
 type VehicleSceneProps = {

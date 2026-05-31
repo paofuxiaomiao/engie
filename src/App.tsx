@@ -48,6 +48,8 @@ const moduleIcons: ModuleIconMap = {
   cockpit: BrainCircuit,
 };
 
+const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path}`;
+
 const initialModule = vehicleProfile.modules[0];
 
 const engineTopics = [
@@ -55,7 +57,7 @@ const engineTopics = [
     id: "engine-principle",
     title: "发动机工作原理与基本构造",
     eyebrow: "四冲程循环",
-    image: "/engine-renders/engine-principle.png",
+    image: assetPath("engine-renders/engine-principle.png"),
     color: "#0f8fb3",
     summary:
       "以内燃机剖面展示气缸、活塞、曲轴、进排气通道与火花塞，帮助理解进气、压缩、做功、排气如何连续循环。",
@@ -65,7 +67,7 @@ const engineTopics = [
     id: "crank-valve",
     title: "曲柄连杆机构与配气机构",
     eyebrow: "机械同步",
-    image: "/engine-renders/crank-valve.png",
+    image: assetPath("engine-renders/crank-valve.png"),
     color: "#f28c28",
     summary:
       "把曲轴、连杆、活塞、凸轮轴、正时链条和气门放在同一张结构图中，强调动力输出与气门开闭的时序关系。",
@@ -75,7 +77,7 @@ const engineTopics = [
     id: "fuel-ignition",
     title: "燃油供给与点火系统",
     eyebrow: "混合气形成",
-    image: "/engine-renders/fuel-ignition.png",
+    image: assetPath("engine-renders/fuel-ignition.png"),
     color: "#20b66f",
     summary:
       "展示燃油泵、燃油轨、喷油器、进气歧管、点火线圈和火花塞，让燃油、空气、电火花三条路径同时可见。",
@@ -85,7 +87,7 @@ const engineTopics = [
     id: "cooling-lubrication",
     title: "冷却系统与润滑系统",
     eyebrow: "热管理与减摩",
-    image: "/engine-renders/cooling-lubrication.png",
+    image: assetPath("engine-renders/cooling-lubrication.png"),
     color: "#7c5cff",
     summary:
       "用蓝色冷却液回路和金色机油回路表现水套、散热器、水泵、油底壳、机油泵与油道的协同工作。",
@@ -379,7 +381,7 @@ function BottomPanels({ selectedModule }: BottomPanelsProps) {
           <small>imagegen asset</small>
         </div>
         <figure>
-          <img src="/vehicle-renders/su7-style-cutaway.png" alt="SU7 风格纯电轿跑透明结构剖面渲染图" />
+          <img src={assetPath("vehicle-renders/su7-style-cutaway.png")} alt="SU7 风格纯电轿跑透明结构剖面渲染图" />
         </figure>
       </div>
 
